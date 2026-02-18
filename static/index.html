@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <title>Онлайн-продажи за период</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent2: #3fb950;
+      --border: #30363d;
+      --touch: 44px;
+      --pad: max(12px, env(safe-area-inset-left));
+      --pad-r: max(12px, env(safe-area-inset-right));
+      --pad-b: max(12px, env(safe-area-inset-bottom));
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px var(--pad-r) 12px var(--pad);
+      padding-top: max(12px, env(safe-area-inset-top));
+    }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 0;
+      color: var(--text);
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .header a {
+      flex-shrink: 0;
+      font-size: 0.875rem;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 8px 0;
+    }
+    .header a:hover { color: var(--accent); }
+
+    .main {
+      padding: 16px var(--pad-r) calc(24px + var(--pad-b)) var(--pad);
+    }
+
+    /* Период и кнопки */
+    .block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .block-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    input[type="date"] {
+      min-height: var(--touch);
+      padding: 0 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      font-size: 1rem;
+      flex: 1;
+      min-width: 0;
+    }
+    .btn {
+      min-height: var(--touch);
+      padding: 0 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      flex: 1;
+      min-width: 140px;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+    /* Фильтр типов товаров */
+    .filters {
+      margin-bottom: 16px;
+    }
+    .filter-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: var(--touch);
+      padding: 0 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      color: var(--text);
+      font-size: 0.875rem;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .filter-chip.off {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+    .filter-chip input { display: none; }
+
+    /* Вкладки — mobile-first: сетка 2 колонки, все вкладки видны без скролла */
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .tab {
+      min-height: var(--touch);
+      min-width: 0;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 0.875rem;
+      line-height: 1.2;
+      white-space: normal;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Сводка */
+    .summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; margin-bottom: 4px; }
+    .card .value { font-size: 1.5rem; font-weight: 700; color: var(--accent2); }
+    .card.wide { grid-column: 1 / -1; }
+    .card .value.small { font-size: 1rem; font-weight: 600; color: var(--text); }
+
+    /* Графики */
+    .chart-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      min-height: 260px;
+    }
+    .chart-wrap h3 { font-size: 0.875rem; color: var(--muted); margin: 0 0 12px; }
+    .chart-wrap canvas { max-height: 280px; }
+
+    .status { font-size: 0.875rem; color: var(--muted); margin-top: 8px; }
+    .status.error { color: #f85149; }
+    .status.success { color: var(--accent2); }
+
+    .metric-toggle {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+    }
+    .metric-toggle button {
+      flex: 1;
+      min-height: var(--touch);
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .metric-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .analytics-panel {
+      min-height: 80vh;
+      padding-bottom: 2rem;
+    }
+    .analytics-hero {
+      text-align: center;
+      padding: 24px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      margin-bottom: 20px;
+    }
+    .analytics-hero .trend-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 8px; }
+    .analytics-hero .trend-value { font-size: 2rem; font-weight: 700; }
+    .analytics-hero .trend-value.up { color: var(--accent2); }
+    .analytics-hero .trend-value.down { color: #f85149; }
+    .analytics-hero .trend-value.flat { color: var(--muted); }
+    .analytics-hero .trend-detail { font-size: 0.9375rem; color: var(--muted); margin-top: 4px; }
+    .analytics-compare {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .analytics-compare h4 { font-size: 0.875rem; color: var(--muted); margin: 0 0 12px; }
+    .compare-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-row .label { color: var(--text); }
+    .compare-row .current { font-weight: 600; }
+    .compare-row .prev { color: var(--muted); font-size: 0.875rem; }
+    .compare-row .pct { font-weight: 600; font-size: 0.9375rem; }
+    .compare-row .pct.positive { color: var(--accent2); }
+    .compare-row .pct.negative { color: #f85149; }
+    .insights-list { margin-top: 20px; }
+    .insights-list h4 { font-size: 0.875rem; color: var(--muted); margin-bottom: 12px; }
+    .insights-list ul { margin: 0; padding-left: 1.2rem; color: var(--text); line-height: 1.6; }
+    .insights-list li.good { color: var(--accent2); }
+    .insights-list li.warn { color: #d29922; }
+    .insights-list li.bad { color: #f85149; }
+    .chart-wrap.trend-chart { min-height: 300px; }
+
+    @media (min-width: 600px) {
+      .summary { grid-template-columns: repeat(3, 1fr); }
+      .card.wide { grid-column: auto; }
+    }
+    @media (min-width: 768px) {
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        grid-template-columns: unset;
+      }
+      .tab {
+        flex: 0 0 auto;
+        font-size: 0.9375rem;
+        padding: 0 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>Онлайн-продажи за период</h1>
+    <a href="/logout">Выйти</a>
+  </header>
+
+  <main class="main">
+    <div class="block">
+      <div class="block-title">На дату</div>
+      <div class="row" style="margin-bottom: 12px;">
+        <input type="date" id="dateRef" aria-label="На дату" />
+      </div>
+      <div class="row">
+        <button type="button" id="btnReport" class="btn btn-primary">Показать отчёт</button>
+        <button type="button" id="btnRefresh" class="btn btn-secondary">Обновить данные</button>
+      </div>
+      <p class="status" id="status"></p>
+    </div>
+
+    <div class="block filters">
+      <div class="block-title">Учитывать в отчёте (снимите, чтобы исключить)</div>
+      <div class="filter-list" id="filterList"></div>
+    </div>
+
+    <div class="block">
+      <div class="block-title">Метрика</div>
+      <div class="metric-toggle" role="group" aria-label="Выбор метрики">
+        <button type="button" class="metric-btn active" data-metric="revenue">Сумма</button>
+        <button type="button" class="metric-btn" data-metric="orders">Количество</button>
+        <button type="button" class="metric-btn" data-metric="avg">Средний чек</button>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="summary">Итоги</button>
+      <button type="button" class="tab" role="tab" data-tab="day">7 дней</button>
+      <button type="button" class="tab" role="tab" data-tab="week">По неделям</button>
+      <button type="button" class="tab" role="tab" data-tab="channel">Каналы</button>
+      <button type="button" class="tab" role="tab" data-tab="product">Товары</button>
+      <button type="button" class="tab" role="tab" data-tab="analytics">Аналитика</button>
+    </nav>
+
+    <section id="panel-summary" class="tab-panel active" role="tabpanel">
+      <div class="summary">
+        <div class="card">
+          <div class="label" id="label7d">За 7 дней</div>
+          <div class="value" id="value7d">—</div>
+        </div>
+        <div class="card">
+          <div class="label" id="label4w">За 4 недели</div>
+          <div class="value" id="value4w">—</div>
+        </div>
+        <div class="card wide">
+          <div class="label">На дату</div>
+          <div class="value small" id="periodRange">—</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-day" class="tab-panel" role="tabpanel">
+      <div class="chart-wrap">
+        <h3>Последние 7 дней</h3>
+        <canvas id="chartByDay"></canvas>
+      </div>
+    </section>
+
+    <section id="panel-week" class="tab-panel" role="tabpanel">
+      <div class="chart-wrap">
+        <h3>По неделям (4 недели)</h3>
+        <canvas id="chartByWeek"></canvas>
+      </div>
+    </section>
+
+    <section id="panel-channel" class="tab-panel" role="tabpanel">
+      <div class="chart-wrap">
+        <h3>По каналу продаж</h3>
+        <canvas id="chartByChannel"></canvas>
+      </div>
+    </section>
+
+    <section id="panel-product" class="tab-panel" role="tabpanel">
+      <div class="chart-wrap">
+        <h3>По типу товара</h3>
+        <canvas id="chartByProduct"></canvas>
+      </div>
+    </section>
+
+    <section id="panel-analytics" class="tab-panel analytics-panel" role="tabpanel">
+      <div class="analytics-hero" id="analyticsHero">
+        <div class="trend-label">Тренд продаж</div>
+        <div class="trend-value" id="trendValue">—</div>
+        <div class="trend-detail" id="trendDetail">Загрузите отчёт</div>
+      </div>
+      <div class="block analytics-compare">
+        <h4>Последние 7 дней vs предыдущие 7 дней</h4>
+        <div id="compare7d"></div>
+      </div>
+      <div class="block analytics-compare">
+        <h4>Текущие 4 недели vs предыдущие 4 недели</h4>
+        <div id="compare4w"></div>
+      </div>
+      <div class="chart-wrap trend-chart">
+        <h3>Динамика выручки по неделям (8 недель)</h3>
+        <canvas id="chartTrend"></canvas>
+      </div>
+      <div class="block insights-list">
+        <h4>Выводы для решений</h4>
+        <ul id="insightsList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const dateRef = document.getElementById('dateRef');
+    const btnReport = document.getElementById('btnReport');
+    const btnRefresh = document.getElementById('btnRefresh');
+    const status = document.getElementById('status');
+    const value7d = document.getElementById('value7d');
+    const value4w = document.getElementById('value4w');
+    const label7d = document.getElementById('label7d');
+    const label4w = document.getElementById('label4w');
+    const periodRange = document.getElementById('periodRange');
+    const filterList = document.getElementById('filterList');
+
+    let currentMetric = 'revenue'; // revenue | orders | avg
+
+    function todayStr() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    if (!dateRef.value) dateRef.value = todayStr();
+
+    let chartByDay = null, chartByWeek = null, chartByChannel = null, chartByProduct = null, chartTrend = null;
+    let productTypesEnabled = {}; // { "Coffee makers": true, ... } — true = учитывать
+
+    function setStatus(msg, isError) {
+      status.textContent = msg;
+      status.className = 'status' + (isError ? ' error' : ' success');
+    }
+
+    function formatMoney(n) {
+      return new Intl.NumberFormat('ru-GE', { maximumFractionDigits: 0 }).format(n) + ' ₾';
+    }
+    function formatAvg(rev, ord) {
+      if (!ord || ord === 0) return '—';
+      return formatMoney(rev / ord);
+    }
+    function getMetricValue(s) {
+      if (currentMetric === 'revenue') return s.total_revenue != null ? formatMoney(s.total_revenue) : '—';
+      if (currentMetric === 'orders') return s.orders_count != null ? String(s.orders_count) : '—';
+      return formatAvg(s.total_revenue, s.orders_count);
+    }
+    function getMetricLabel() {
+      if (currentMetric === 'revenue') return 'Сумма, ₾';
+      if (currentMetric === 'orders') return 'Заказы';
+      return 'Средний чек, ₾';
+    }
+
+    function getExcludeList() {
+      return Object.keys(productTypesEnabled).filter(t => !productTypesEnabled[t]);
+    }
+
+    function fetchReport() {
+      const params = new URLSearchParams();
+      params.set('date', dateRef.value || todayStr());
+      const exclude = getExcludeList();
+      if (exclude.length) params.set('exclude', exclude.join(','));
+      return fetch('/api/report?' + params.toString(), { credentials: 'same-origin' })
+        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('Unauthorized'); } return r.json(); });
+    }
+
+    function renderFilterChips(types) {
+      if (!types || !types.length) return;
+      types.forEach(t => {
+        if (productTypesEnabled[t] === undefined) productTypesEnabled[t] = true;
+      });
+      filterList.innerHTML = '';
+      types.forEach(t => {
+        const label = document.createElement('label');
+        label.className = 'filter-chip' + (productTypesEnabled[t] ? '' : ' off');
+        const checked = productTypesEnabled[t] ? ' checked' : '';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = productTypesEnabled[t];
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(t));
+        label.addEventListener('click', (e) => {
+          e.preventDefault();
+          productTypesEnabled[t] = !productTypesEnabled[t];
+          label.classList.toggle('off', !productTypesEnabled[t]);
+          label.querySelector('input').checked = productTypesEnabled[t];
+          loadAndApply();
+        });
+        filterList.appendChild(label);
+      });
+    }
+
+    function renderSummary(data) {
+      const s7 = data.summary_7d || {};
+      const s4 = data.summary_4w || {};
+      value7d.textContent = getMetricValue(s7);
+      value4w.textContent = getMetricValue(s4);
+      label7d.textContent = 'За 7 дней';
+      label4w.textContent = 'За 4 недели';
+      periodRange.textContent = data.reference_date || '—';
+    }
+
+    function chartValues(arr, metric) {
+      if (metric === 'revenue') return arr.map(d => d.revenue);
+      if (metric === 'orders') return arr.map(d => d.orders);
+      return arr.map(d => d.orders > 0 ? d.revenue / d.orders : 0);
+    }
+
+    function renderCharts(data) {
+      const byDay = data.by_day || [];
+      const byWeek = data.by_week || [];
+      const byChannel = data.by_channel || [];
+      const byProduct = data.by_product_type || [];
+      const labelsDay = byDay.map(d => d.label || d.date);
+      const labelsWeek = byWeek.map(d => d.label);
+      const yLabel = getMetricLabel();
+
+      if (chartByDay) chartByDay.destroy();
+      chartByDay = new Chart(document.getElementById('chartByDay'), {
+        type: 'bar',
+        data: {
+          labels: labelsDay,
+          datasets: [{ label: yLabel, data: chartValues(byDay, currentMetric), backgroundColor: 'rgba(63, 185, 80, 0.6)' }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
+            x: { grid: { display: false }, ticks: { color: '#8b949e', maxRotation: 45 } }
+          }
+        }
+      });
+
+      if (chartByWeek) chartByWeek.destroy();
+      chartByWeek = new Chart(document.getElementById('chartByWeek'), {
+        type: 'bar',
+        data: {
+          labels: labelsWeek,
+          datasets: [{ label: yLabel, data: chartValues(byWeek, currentMetric), backgroundColor: 'rgba(88, 166, 255, 0.6)' }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
+            x: { grid: { display: false }, ticks: { color: '#8b949e', maxRotation: 45 } }
+          }
+        }
+      });
+
+      if (chartByChannel) chartByChannel.destroy();
+      const colors = ['#58a6ff','#3fb950','#d29922','#a371f7','#f85149','#8b949e'];
+      chartByChannel = new Chart(document.getElementById('chartByChannel'), {
+        type: 'doughnut',
+        data: {
+          labels: byChannel.map(d => d.channel),
+          datasets: [{ data: byChannel.map(d => d.revenue), backgroundColor: byChannel.map((_, i) => colors[i % colors.length]) }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom', labels: { color: '#e6edf3', padding: 12 } } }
+        }
+      });
+
+      if (chartByProduct) chartByProduct.destroy();
+      chartByProduct = new Chart(document.getElementById('chartByProduct'), {
+        type: 'bar',
+        data: {
+          labels: byProduct.map(d => d.product_type),
+          datasets: [{ label: 'Выручка, ₾', data: byProduct.map(d => d.revenue), backgroundColor: 'rgba(88, 166, 255, 0.6)' }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
+            y: { grid: { display: false }, ticks: { color: '#8b949e' } }
+          }
+        }
+      });
+    }
+
+    let lastReportData = null;
+
+    function pctChange(curr, prev) {
+      if (prev == null || prev === 0) return curr > 0 ? 100 : 0;
+      return Math.round(((curr - prev) / prev) * 100);
+    }
+    function renderAnalytics(data) {
+      var prev7 = data.prev_7d || {};
+      var prev4 = data.prev_4w || {};
+      var s7 = data.summary_7d || {};
+      var s4 = data.summary_4w || {};
+      var trend = data.weekly_trend || [];
+
+      var rev7 = s7.total_revenue || 0, ord7 = s7.orders_count || 0;
+      var rev7p = prev7.total_revenue || 0, ord7p = prev7.orders_count || 0;
+      var rev4 = s4.total_revenue || 0, ord4 = s4.orders_count || 0;
+      var rev4p = prev4.total_revenue || 0, ord4p = prev4.orders_count || 0;
+
+      var pctRev7 = pctChange(rev7, rev7p), pctOrd7 = pctChange(ord7, ord7p);
+      var pctRev4 = pctChange(rev4, rev4p), pctOrd4 = pctChange(ord4, ord4p);
+      var avg7 = ord7 ? rev7 / ord7 : 0, avg7p = ord7p ? rev7p / ord7p : 0;
+      var avg4 = ord4 ? rev4 / ord4 : 0, avg4p = ord4p ? rev4p / ord4p : 0;
+      var pctAvg7 = pctChange(avg7, avg7p), pctAvg4 = pctChange(avg4, avg4p);
+
+      var hero = document.getElementById('analyticsHero');
+      var trendVal = document.getElementById('trendValue');
+      var trendDet = document.getElementById('trendDetail');
+      trendVal.className = 'trend-value';
+      if (rev7p === 0 && rev7 === 0) {
+        trendVal.textContent = 'Нет данных';
+        trendDet.textContent = 'Выберите дату с продажами';
+      } else if (pctRev7 > 0) {
+        trendVal.classList.add('up');
+        trendVal.textContent = 'Рост ↑';
+        trendDet.textContent = 'Выручка за 7 дней выросла на ' + pctRev7 + '% к предыдущим 7 дням';
+      } else if (pctRev7 < 0) {
+        trendVal.classList.add('down');
+        trendVal.textContent = 'Спад ↓';
+        trendDet.textContent = 'Выручка за 7 дней снизилась на ' + Math.abs(pctRev7) + '% к предыдущим 7 дням';
+      } else {
+        trendVal.classList.add('flat');
+        trendVal.textContent = 'Без изменений →';
+        trendDet.textContent = 'Выручка за 7 дней на уровне предыдущих 7 дней';
+      }
+
+      function row(label, curr, prev, pct, fmt) {
+        var c = fmt ? formatMoney(curr) : (curr != null ? String(curr) : '—');
+        var p = fmt ? formatMoney(prev) : (prev != null ? String(prev) : '—');
+        var pctCl = pct > 0 ? 'positive' : (pct < 0 ? 'negative' : '');
+        var pctStr = (pct > 0 ? '+' : '') + pct + '%';
+        return '<div class="compare-row"><span class="label">' + label + '</span><span><span class="current">' + c + '</span> <span class="prev">(было ' + p + ')</span></span><span class="pct ' + pctCl + '">' + pctStr + '</span></div>';
+      }
+      document.getElementById('compare7d').innerHTML =
+        row('Выручка', rev7, rev7p, pctRev7, true) +
+        row('Заказов', ord7, ord7p, pctOrd7, false) +
+        row('Средний чек', Math.round(avg7 * 100) / 100, Math.round(avg7p * 100) / 100, pctAvg7, true);
+      document.getElementById('compare4w').innerHTML =
+        row('Выручка', rev4, rev4p, pctRev4, true) +
+        row('Заказов', ord4, ord4p, pctOrd4, false) +
+        row('Средний чек', Math.round(avg4 * 100) / 100, Math.round(avg4p * 100) / 100, pctAvg4, true);
+
+      var insights = [];
+      if (pctRev7 > 5) insights.push({ class: 'good', text: 'Выручка за неделю растёт — хорошая динамика.' });
+      else if (pctRev7 < -5) insights.push({ class: 'bad', text: 'Выручка за 7 дней падает — стоит проверить каналы и ассортимент.' });
+      if (pctOrd7 > 10) insights.push({ class: 'good', text: 'Больше заказов — растёт охват или конверсия.' });
+      else if (pctOrd7 < -10 && ord7 > 0) insights.push({ class: 'warn', text: 'Меньше заказов — можно усилить маркетинг или акции.' });
+      if (pctAvg7 > 5) insights.push({ class: 'good', text: 'Средний чек вырос — клиенты берут больше или дороже.' });
+      else if (pctAvg7 < -10 && avg7 > 0) insights.push({ class: 'warn', text: 'Средний чек снизился — скидки или смещение в более дешёвые товары.' });
+      if (pctRev4 > 0 && pctRev7 < 0) insights.push({ class: 'warn', text: 'За месяц рост, но за неделю спад — возможна сезонность или разовая просадка.' });
+      if (trend.length >= 2) {
+        var last = trend[trend.length - 1].revenue, prevLast = trend[trend.length - 2].revenue;
+        if (prevLast > 0 && last > prevLast * 1.1) insights.push({ class: 'good', text: 'Текущая неделя заметно выше предыдущей — положительный импульс.' });
+        else if (prevLast > 0 && last < prevLast * 0.7) insights.push({ class: 'bad', text: 'Текущая неделя слабее предыдущей — стоит разобрать причины.' });
+      }
+      if (insights.length === 0) insights.push({ class: '', text: 'Данных пока недостаточно для выводов или динамика нейтральная.' });
+      document.getElementById('insightsList').innerHTML = insights.map(function (i) {
+        return '<li class="' + i.class + '">' + i.text + '</li>';
+      }).join('');
+
+      if (chartTrend) chartTrend.destroy();
+      if (trend.length) {
+        chartTrend = new Chart(document.getElementById('chartTrend'), {
+          type: 'line',
+          data: {
+            labels: trend.map(function (w) { return w.label; }),
+            datasets: [{
+              label: 'Выручка, ₾',
+              data: trend.map(function (w) { return w.revenue; }),
+              borderColor: 'rgb(88, 166, 255)',
+              backgroundColor: 'rgba(88, 166, 255, 0.1)',
+              fill: true,
+              tension: 0.2
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
+              x: { grid: { display: false }, ticks: { color: '#8b949e' } }
+            }
+          }
+        });
+      }
+    }
+
+    function applyReport(data) {
+      lastReportData = data;
+      renderSummary(data);
+      renderCharts(data);
+      if (data.prev_7d) renderAnalytics(data);
+      if (data.product_types_available && data.product_types_available.length && !filterList.innerHTML) {
+        renderFilterChips(data.product_types_available);
+      }
+    }
+
+    function setMetric(metric) {
+      currentMetric = metric;
+      document.querySelectorAll('.metric-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.metric === metric);
+      });
+      if (lastReportData) {
+        renderSummary(lastReportData);
+        renderCharts(lastReportData);
+      }
+    }
+
+    function loadAndApply() {
+      setStatus('Загрузка…');
+      btnReport.disabled = true;
+      fetchReport()
+        .then(applyReport)
+        .then(() => setStatus(''))
+        .catch(err => { setStatus('Ошибка: ' + err.message, true); })
+        .finally(() => { btnReport.disabled = false; });
+    }
+
+    btnReport.addEventListener('click', loadAndApply);
+
+    btnRefresh.addEventListener('click', () => {
+      setStatus('Обновление…');
+      btnRefresh.disabled = true;
+      const params = new URLSearchParams();
+      params.set('date', dateRef.value || todayStr());
+      const exclude = getExcludeList();
+      if (exclude.length) params.set('exclude', exclude.join(','));
+      fetch('/api/refresh?' + params.toString(), { method: 'POST', credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(body => {
+          if (body.ok && body.report) {
+            applyReport(body.report);
+            setStatus('Данные обновлены');
+          } else {
+            setStatus(body.error || 'Ошибка', true);
+          }
+        })
+        .catch(err => setStatus('Ошибка: ' + err.message, true))
+        .finally(() => { btnRefresh.disabled = false; });
+    });
+
+    document.querySelectorAll('.metric-btn').forEach(btn => {
+      btn.addEventListener('click', () => setMetric(btn.dataset.metric));
+    });
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        const id = 'panel-' + tab.dataset.tab;
+        document.getElementById(id).classList.add('active');
+      });
+    });
+
+    fetchReport().then(applyReport).catch(() => {});
+  </script>
+</body>
+</html>
