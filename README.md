@@ -123,6 +123,34 @@ python app.py
 - Смените **ADMIN_PASSWORD** (и при необходимости **ADMIN_USER**).
 - Не коммитьте файл `.env` (он в `.gitignore`).
 
+## Деплой на GitHub и Railway
+
+### 1. Репозиторий на GitHub
+
+1. Создайте новый репозиторий на [github.com](https://github.com/new) (без README, без .gitignore).
+2. Выполните в каталоге проекта (подставьте свой URL репозитория):
+
+```powershell
+cd D:\CursorProjects\online-sales-statistic
+git remote add origin https://github.com/ВАШ_ЛОГИН/online-sales-statistic.git
+git push -u origin production
+```
+
+Ветка **production** — для деплоя. Дальнейшие изменения: `git checkout production`, правки, `git add`, `git commit`, `git push origin production`.
+
+### 2. Деплой на Railway
+
+1. Зайдите на [railway.app](https://railway.app), войдите через GitHub.
+2. **New Project** → **Deploy from GitHub repo** → выберите репозиторий **online-sales-statistic**, ветку **production**.
+3. В настройках сервиса добавьте переменные окружения (Variables):
+   - `SECRET_KEY` — длинная случайная строка (например, сгенерированная онлайн).
+   - `ADMIN_USER` — логин входа (например, `admin`).
+   - `ADMIN_PASSWORD` — пароль входа.
+4. Railway сам соберёт проект (Nixpacks), установит зависимости и запустит по `railway.json`: `gunicorn --bind 0.0.0.0:$PORT app:app`.
+5. В разделе **Settings** → **Networking** нажмите **Generate Domain** — получите публичный URL.
+
+**Важно:** На Railway файловая система эфемерная. Кнопка «Обновить данные» подтянет CSV до перезапуска сервиса; после рестарта данные нужно обновить снова или настроить постоянное хранилище (Volume / внешнее хранилище).
+
 ## Лицензия
 
 Проект для внутреннего использования.
