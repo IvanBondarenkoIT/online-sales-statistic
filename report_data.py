@@ -76,7 +76,13 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
     df = df.rename(columns=col_map)
 
     if "Date" in df.columns:
-        df["_date"] = df["Date"].apply(_parse_date)
+        primary_dates = df["Date"].apply(_parse_date)
+        # В экспорте из Google иногда дата дублируется в последней колонке (заголовок может быть не "Date")
+        last_col_name = df.columns[-1]
+        if last_col_name != "Date" and len(df.columns) > 1:
+            fallback_dates = df.iloc[:, -1].apply(_parse_date)
+            primary_dates = primary_dates.fillna(fallback_dates)
+        df["_date"] = primary_dates
         df = df[df["_date"].notna()].copy()
     if "Total Amount" in df.columns:
         df["_total"] = df["Total Amount"].apply(_to_float)
