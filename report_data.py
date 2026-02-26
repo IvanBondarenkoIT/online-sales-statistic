@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 DATA_CSV = Path(__file__).resolve().parent / "data" / "online_sales.csv"
+DATA_INPUT_DIR = Path(__file__).resolve().parent / "data" / "input"
 
 # Форматы дат в таблице: 02.02.2026, 2.2.2026, 15.2.26
 DATE_FORMATS = ["%d.%m.%Y", "%d.%m.%y"]
@@ -18,9 +19,14 @@ def _parse_date(s) -> datetime | None:
     # На случай если pandas передаёт Series (дубликаты колонок)
     if hasattr(s, "iloc") and hasattr(s, "empty"):
         s = s.iloc[0] if len(s) else None
-    if pd.isna(s) or s is None or not str(s).strip():
+    if pd.isna(s) or s is None:
         return None
+    # Даты из Excel часто приходят как datetime
+    if isinstance(s, datetime):
+        return s
     s = str(s).strip()
+    if not s:
+        return None
     for fmt in DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt)
@@ -56,15 +62,77 @@ def _to_float(val):
         return None
 
 
+def _latest_input_excel() -> Path | None:
+    """Последний по времени изменения .xlsx в data/input."""
+    if not DATA_INPUT_DIR.exists():
+        return None
+    xlsx = list(DATA_INPUT_DIR.glob("*.xlsx"))
+    if not xlsx:
+        return None
+    return max(xlsx, key=lambda p: p.stat().st_mtime)
+
+
+def _normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Единые имена колонок (Date, Total Amount, Sales channel, Product Type) для выравнивания листов."""
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    col_map = {}
+    for c in df.columns:
+        lower = c.lower()
+        if "total amount" in lower or "totalamount" in lower:
+            col_map[c] = "Total Amount"
+        elif "date" in lower:
+            col_map[c] = "Date"
+        elif "sales channel" in lower:
+            col_map[c] = "Sales channel"
+        elif "product type" in lower:
+            col_map[c] = "Product Type"
+    df = df.rename(columns=col_map)
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="first")]
+    return df
+
+
+def _read_df_from_path(path: Path) -> pd.DataFrame:
+    """Читает CSV или Excel (все листы объединяются) в один DataFrame. У Excel имена колонок нормализуются по каждому листу, чтобы январь/февраль/март выровнялись."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx" or suffix == ".xls":
+        try:
+            xl = pd.ExcelFile(path, engine="openpyxl" if suffix == ".xlsx" else None)
+        except Exception:
+            return pd.DataFrame()
+        frames = []
+        for name in xl.sheet_names:
+            df = pd.read_excel(xl, sheet_name=name)
+            if df is not None and not df.empty:
+                df = _normalize_column_names(df)
+                frames.append(df)
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True, sort=False)
+    # CSV
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    return df
+
+
 def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
-    """Загружает CSV, нормализует имена столбцов и типы."""
-    path = csv_path or DATA_CSV
+    """Загружает данные из CSV или из Excel в data/input. Нормализует имена столбцов и типы."""
+    path = csv_path
+    if path is None:
+        excel_path = _latest_input_excel()
+        path = excel_path if excel_path is not None else DATA_CSV
     if not path.exists():
         return pd.DataFrame()
 
-    df = pd.read_csv(path, encoding="utf-8-sig")
+    df = _read_df_from_path(path)
+    if df.empty:
+        return pd.DataFrame()
     # Убираем пробелы и табы в названиях столбцов
     df.columns = [str(c).strip() for c in df.columns]
+    # Убираем дубликаты колонок (после объединения листов Excel могут быть одинаковые имена)
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
     # Унифицируем ключевые имена (на случай разных экспортов)
     col_map = {}
@@ -79,6 +147,8 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
         elif "product type" in lower:
             col_map[c] = "Product Type"
     df = df.rename(columns=col_map)
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
     if "Date" in df.columns:
         date_col = df["Date"]
@@ -93,7 +163,7 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
                 last_col = last_col.iloc[:, 0]
             fallback_dates = last_col.apply(_parse_date)
             primary_dates = primary_dates.fillna(fallback_dates)
-        df["_date"] = primary_dates
+        df["_date"] = pd.to_datetime(primary_dates, errors="coerce")
         df = df[df["_date"].notna()].copy()
     if "Total Amount" in df.columns:
         df["_total"] = df["Total Amount"].apply(_to_float)

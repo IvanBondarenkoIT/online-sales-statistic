@@ -492,13 +492,22 @@
       return Object.keys(productTypesEnabled).filter(t => !productTypesEnabled[t]);
     }
 
+    function parseJsonResponse(r) {
+      if (r.status === 401) {
+        location.href = '/login?next=' + encodeURIComponent(location.href);
+        throw new Error('Unauthorized');
+      }
+      var ct = (r.headers.get('Content-Type') || '').toLowerCase();
+      if (ct.indexOf('application/json') !== -1) return r.json();
+      return r.text().then(function(t) { throw new Error(t ? t.slice(0, 120) : 'HTTP ' + r.status); });
+    }
+
     function fetchReport() {
       const params = new URLSearchParams();
       params.set('date', dateRef.value || todayStr());
       const exclude = getExcludeList();
       if (exclude.length) params.set('exclude', exclude.join(','));
-      return fetch('/api/report?' + params.toString(), { credentials: 'same-origin' })
-        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('Unauthorized'); } return r.json(); });
+      return fetch('/api/report?' + params.toString(), { credentials: 'same-origin' }).then(parseJsonResponse);
     }
 
     function renderFilterChips(types) {
@@ -735,8 +744,7 @@
       const params = new URLSearchParams();
       params.set('date', dateRef.value || todayStr());
       params.set('period', period || currentEventsPeriod);
-      return fetch('/api/events?' + params.toString(), { credentials: 'same-origin' })
-        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.href); throw new Error('Unauthorized'); } return r.json(); });
+      return fetch('/api/events?' + params.toString(), { credentials: 'same-origin' }).then(parseJsonResponse);
     }
     function renderEventsList(data) {
       const list = document.getElementById('eventsList');
@@ -773,8 +781,7 @@
       const params = new URLSearchParams();
       params.set('date', dateRef.value || todayStr());
       params.set('period', period || currentEventsAnalysisPeriod);
-      return fetch('/api/events-analysis?' + params.toString(), { credentials: 'same-origin' })
-        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.href); throw new Error('Unauthorized'); } return r.json(); });
+      return fetch('/api/events-analysis?' + params.toString(), { credentials: 'same-origin' }).then(parseJsonResponse);
     }
     function renderEventsAnalysisList(data) {
       const list = document.getElementById('eventsAnalysisList');
@@ -851,7 +858,7 @@
       const exclude = getExcludeList();
       if (exclude.length) params.set('exclude', exclude.join(','));
       fetch('/api/refresh?' + params.toString(), { method: 'POST', credentials: 'same-origin' })
-        .then(r => r.json())
+        .then(parseJsonResponse)
         .then(body => {
           if (body.ok && body.report) {
             applyReport(body.report);
