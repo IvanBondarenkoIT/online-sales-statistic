@@ -15,7 +15,10 @@ DATE_FORMATS = ["%d.%m.%Y", "%d.%m.%y"]
 
 
 def _parse_date(s) -> datetime | None:
-    if pd.isna(s) or not str(s).strip():
+    # На случай если pandas передаёт Series (дубликаты колонок)
+    if hasattr(s, "iloc") and hasattr(s, "empty"):
+        s = s.iloc[0] if len(s) else None
+    if pd.isna(s) or s is None or not str(s).strip():
         return None
     s = str(s).strip()
     for fmt in DATE_FORMATS:
@@ -37,6 +40,8 @@ def _parse_date(s) -> datetime | None:
 
 
 def _to_float(val):
+    if hasattr(val, "iloc") and hasattr(val, "empty"):
+        val = val.iloc[0] if len(val) else None
     if pd.isna(val) or val == "" or val is None:
         return None
     if isinstance(val, (int, float)):
@@ -76,11 +81,17 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
     df = df.rename(columns=col_map)
 
     if "Date" in df.columns:
-        primary_dates = df["Date"].apply(_parse_date)
+        date_col = df["Date"]
+        if isinstance(date_col, pd.DataFrame):
+            date_col = date_col.iloc[:, 0]
+        primary_dates = date_col.apply(_parse_date)
         # В экспорте из Google иногда дата дублируется в последней колонке (заголовок может быть не "Date")
         last_col_name = df.columns[-1]
         if last_col_name != "Date" and len(df.columns) > 1:
-            fallback_dates = df.iloc[:, -1].apply(_parse_date)
+            last_col = df.iloc[:, -1]
+            if isinstance(last_col, pd.DataFrame):
+                last_col = last_col.iloc[:, 0]
+            fallback_dates = last_col.apply(_parse_date)
             primary_dates = primary_dates.fillna(fallback_dates)
         df["_date"] = primary_dates
         df = df[df["_date"].notna()].copy()
@@ -305,6 +316,8 @@ def build_report(
     ref = _parse_reference_date(reference_date) if use_ref else None
 
     df = load_sales_df(csv_path)
+    if not df.empty and "_total" not in df.columns:
+        df = pd.DataFrame()
 
     if use_ref and ref is not None:
         # Режим «на дату»: последние 7 дней + 4 недели + данные для аналитики (8 недель назад)
@@ -315,13 +328,17 @@ def build_report(
     else:
         df = filter_by_period(df, date_from, date_to)
 
-    product_types_raw = df["Product Type"].dropna().astype(str).str.strip()
-    product_types_raw = product_types_raw[product_types_raw != ""]
-    product_types_available = sorted(product_types_raw.unique().tolist())
+    if "Product Type" in df.columns:
+        product_types_raw = df["Product Type"].dropna().astype(str).str.strip()
+        product_types_raw = product_types_raw[product_types_raw != ""]
+        product_types_available = sorted(product_types_raw.unique().tolist())
+    else:
+        product_types_raw = pd.Series(dtype=object)
+        product_types_available = []
 
-    if exclude_product_types:
+    if exclude_product_types and "Product Type" in df.columns and not product_types_raw.empty:
         exclude_set = {x.strip() for x in exclude_product_types if x and str(x).strip()}
-        df = df[~product_types_raw.isin(exclude_set)].copy()
+        df = df[~product_types_raw.reindex(df.index).fillna("").isin(exclude_set)].copy()
 
     if df.empty:
         empty = {
@@ -350,12 +367,18 @@ def build_report(
         prev_7d = _prev_7_days(df, ref)
         prev_4w = _prev_4_weeks(df, ref)
         weekly_trend = _weekly_trend(df, ref, 8)
-        ch = df.groupby(df["Sales channel"].fillna("—").astype(str))["_total"].sum().reset_index()
-        ch.columns = ["channel", "revenue"]
-        by_channel = [{"channel": r["channel"], "revenue": float(r["revenue"])} for _, r in ch.sort_values("revenue", ascending=False).iterrows()]
-        pt = df.groupby(df["Product Type"].fillna("—").astype(str))["_total"].sum().reset_index()
-        pt.columns = ["product_type", "revenue"]
-        by_product_type = [{"product_type": r["product_type"], "revenue": float(r["revenue"])} for _, r in pt.sort_values("revenue", ascending=False).iterrows()]
+        if "Sales channel" in df.columns:
+            ch = df.groupby(df["Sales channel"].fillna("—").astype(str))["_total"].sum().reset_index()
+            ch.columns = ["channel", "revenue"]
+            by_channel = [{"channel": r["channel"], "revenue": float(r["revenue"])} for _, r in ch.sort_values("revenue", ascending=False).iterrows()]
+        else:
+            by_channel = []
+        if "Product Type" in df.columns:
+            pt = df.groupby(df["Product Type"].fillna("—").astype(str))["_total"].sum().reset_index()
+            pt.columns = ["product_type", "revenue"]
+            by_product_type = [{"product_type": r["product_type"], "revenue": float(r["revenue"])} for _, r in pt.sort_values("revenue", ascending=False).iterrows()]
+        else:
+            by_product_type = []
         return {
             "reference_date": ref.isoformat(),
             "summary_7d": summary_7d,
@@ -376,12 +399,18 @@ def build_report(
     date_from_dt = dates.min()
     date_to_dt = dates.max()
     by_day, by_day_group = _aggregate_by_day(df, date_from_dt, date_to_dt)
-    ch = df.groupby(df["Sales channel"].fillna("—").astype(str))["_total"].sum().reset_index()
-    ch.columns = ["channel", "revenue"]
-    by_channel = [{"channel": r["channel"], "revenue": float(r["revenue"])} for _, r in ch.sort_values("revenue", ascending=False).iterrows()]
-    pt = df.groupby(df["Product Type"].fillna("—").astype(str))["_total"].sum().reset_index()
-    pt.columns = ["product_type", "revenue"]
-    by_product_type = [{"product_type": r["product_type"], "revenue": float(r["revenue"])} for _, r in pt.sort_values("revenue", ascending=False).iterrows()]
+    if "Sales channel" in df.columns:
+        ch = df.groupby(df["Sales channel"].fillna("—").astype(str))["_total"].sum().reset_index()
+        ch.columns = ["channel", "revenue"]
+        by_channel = [{"channel": r["channel"], "revenue": float(r["revenue"])} for _, r in ch.sort_values("revenue", ascending=False).iterrows()]
+    else:
+        by_channel = []
+    if "Product Type" in df.columns:
+        pt = df.groupby(df["Product Type"].fillna("—").astype(str))["_total"].sum().reset_index()
+        pt.columns = ["product_type", "revenue"]
+        by_product_type = [{"product_type": r["product_type"], "revenue": float(r["revenue"])} for _, r in pt.sort_values("revenue", ascending=False).iterrows()]
+    else:
+        by_product_type = []
     return {
         "summary": {
             "total_revenue": float(round(total_revenue, 2)),
