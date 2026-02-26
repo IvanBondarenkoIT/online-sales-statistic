@@ -19,6 +19,7 @@ def _fetch_one_sheet(gid: int) -> pd.DataFrame:
     url = csv_export_url(gid)
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
+    resp.encoding = "utf-8"
     text = resp.text
     if text.startswith("\ufeff"):
         text = text[1:]
@@ -27,16 +28,30 @@ def _fetch_one_sheet(gid: int) -> pd.DataFrame:
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Приводит названия столбцов к единому виду (пробелы/табы)."""
+    """Единые имена колонок (Date, Total Amount, ...), чтобы январь/февраль/март выровнялись при объединении."""
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
+    col_map = {}
+    for c in df.columns:
+        lower = c.lower()
+        if "total amount" in lower or "totalamount" in lower:
+            col_map[c] = "Total Amount"
+        elif "date" in lower:
+            col_map[c] = "Date"
+        elif "sales channel" in lower:
+            col_map[c] = "Sales channel"
+        elif "product type" in lower:
+            col_map[c] = "Product Type"
+    df = df.rename(columns=col_map)
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="first")]
     return df
 
 
 def fetch_via_csv_export() -> pd.DataFrame:
     """
     Скачивает все вкладки из SHEET_GIDS, объединяет в одну таблицу.
-    Так учитываются данные за разные месяцы (каждый месяц — отдельная вкладка).
+    У каждого листа нормализуются имена колонок, чтобы данные февраля не терялись при concat.
     """
     frames = []
     for gid in SHEET_GIDS:
@@ -51,7 +66,7 @@ def fetch_via_csv_export() -> pd.DataFrame:
             continue
     if not frames:
         return pd.DataFrame()
-    combined = pd.concat(frames, ignore_index=True)
+    combined = pd.concat(frames, ignore_index=True, sort=False)
     return combined
 
 
