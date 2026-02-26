@@ -101,12 +101,47 @@ def filter_by_period(
     if date_from is not None:
         if isinstance(date_from, str):
             date_from = _parse_date(date_from) or datetime.min
+        elif isinstance(date_from, date) and not isinstance(date_from, datetime):
+            date_from = datetime.combine(date_from, datetime.min.time())
         df = df[df["_date"] >= date_from]
     if date_to is not None:
         if isinstance(date_to, str):
             date_to = _parse_date(date_to) or datetime.max
+        elif isinstance(date_to, date) and not isinstance(date_to, datetime):
+            date_to = datetime.combine(date_to, datetime.max.time())
         df = df[df["_date"] <= date_to]
     return df
+
+
+def sales_in_period(
+    date_from: str | date | datetime,
+    date_to: str | date | datetime,
+    sales_channel: str | None = None,
+    product_type: str | None = None,
+    csv_path: Path | None = None,
+) -> dict:
+    """
+    Агрегат продаж за период [date_from, date_to] с опциональным фильтром по каналу и типу товара.
+    Возвращает {"total_revenue": float, "orders_count": int}.
+    """
+    df = load_sales_df(csv_path)
+    if df.empty:
+        return {"total_revenue": 0.0, "orders_count": 0}
+    df = filter_by_period(df, date_from, date_to)
+    if df.empty:
+        return {"total_revenue": 0.0, "orders_count": 0}
+    if sales_channel is not None and str(sales_channel).strip():
+        ch = str(sales_channel).strip()
+        df = df[df["Sales channel"].fillna("").astype(str).str.strip().str.lower() == ch.lower()]
+    if product_type is not None and str(product_type).strip():
+        pt = str(product_type).strip()
+        df = df[df["Product Type"].fillna("").astype(str).str.strip().str.lower() == pt.lower()]
+    if df.empty:
+        return {"total_revenue": 0.0, "orders_count": 0}
+    return {
+        "total_revenue": float(round(df["_total"].sum(), 2)),
+        "orders_count": len(df),
+    }
 
 
 def _monday_of(d: date) -> date:

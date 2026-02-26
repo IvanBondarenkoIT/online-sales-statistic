@@ -274,6 +274,24 @@
     .insights-list li.bad { color: #f85149; }
     .chart-wrap.trend-chart { min-height: 300px; }
 
+    .events-list, .events-analysis-list { display: flex; flex-direction: column; gap: 12px; }
+    .event-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .event-card .event-name { font-weight: 600; margin-bottom: 6px; }
+    .event-card .event-meta { font-size: 0.8125rem; color: var(--muted); margin-bottom: 8px; }
+    .event-card .event-sales { font-size: 0.9375rem; color: var(--accent2); }
+    .event-card .event-sales .label { color: var(--muted); font-size: 0.75rem; }
+    .events-analysis-card .event-during, .events-analysis-card .event-before { margin-top: 6px; }
+    .events-analysis-card .event-change { font-weight: 600; margin-top: 4px; }
+    .events-analysis-card .event-change.positive { color: var(--accent2); }
+    .events-analysis-card .event-change.negative { color: #f85149; }
+    .events-analysis-card .event-roi { font-size: 0.875rem; color: var(--muted); margin-top: 4px; }
+    .events-period-row .metric-btn { flex: 1; min-width: 0; }
+
     @media (min-width: 600px) {
       .summary { grid-template-columns: repeat(3, 1fr); }
       .card.wide { grid-column: auto; }
@@ -332,6 +350,7 @@
       <button type="button" class="tab" role="tab" data-tab="channel">Каналы</button>
       <button type="button" class="tab" role="tab" data-tab="product">Товары</button>
       <button type="button" class="tab" role="tab" data-tab="analytics">Аналитика</button>
+      <button type="button" class="tab" role="tab" data-tab="events-analysis">Аналитика по событиям</button>
     </nav>
 
     <section id="panel-summary" class="tab-panel active" role="tabpanel">
@@ -348,6 +367,14 @@
           <div class="label">На дату</div>
           <div class="value small" id="periodRange">—</div>
         </div>
+      </div>
+      <div class="block" id="eventsBlock">
+        <div class="block-title">События за период</div>
+        <div class="row events-period-row" style="margin-bottom:12px">
+          <button type="button" class="metric-btn events-period-btn active" data-period="7d">За 7 дней</button>
+          <button type="button" class="metric-btn events-period-btn" data-period="4w">За 4 недели</button>
+        </div>
+        <div id="eventsList" class="events-list"></div>
       </div>
     </section>
 
@@ -400,6 +427,17 @@
       <div class="block insights-list">
         <h4>Выводы для решений</h4>
         <ul id="insightsList"></ul>
+      </div>
+    </section>
+
+    <section id="panel-events-analysis" class="tab-panel analytics-panel" role="tabpanel">
+      <div class="block">
+        <div class="block-title">Сравнение: продажи до кампании и во время (по целевой группе)</div>
+        <div class="row events-period-row" style="margin-bottom:12px">
+          <button type="button" class="metric-btn events-analysis-period-btn active" data-period="7d">За 7 дней</button>
+          <button type="button" class="metric-btn events-analysis-period-btn" data-period="4w">За 4 недели</button>
+        </div>
+        <div id="eventsAnalysisList" class="events-analysis-list"></div>
       </div>
     </section>
   </main>
@@ -690,11 +728,93 @@
       }
     }
 
+    let currentEventsPeriod = '7d';
+    let currentEventsAnalysisPeriod = '7d';
+
+    function fetchEvents(period) {
+      const params = new URLSearchParams();
+      params.set('date', dateRef.value || todayStr());
+      params.set('period', period || currentEventsPeriod);
+      return fetch('/api/events?' + params.toString(), { credentials: 'same-origin' })
+        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.href); throw new Error('Unauthorized'); } return r.json(); });
+    }
+    function renderEventsList(data) {
+      const list = document.getElementById('eventsList');
+      if (!list) return;
+      const events = data.events || [];
+      if (events.length === 0) {
+        list.innerHTML = '<p class="status">Нет событий за выбранный период или данные не загружены. Нажмите «Обновить данные».</p>';
+        return;
+      }
+      list.innerHTML = events.map(ev => {
+        const target = [ev.sales_target, ev.product_type].filter(Boolean).join(' · ') || 'все продажи';
+        const sd = ev.sales_during || {};
+        return '<div class="event-card">' +
+          '<div class="event-name">' + escapeHtml(ev.name) + '</div>' +
+          '<div class="event-meta">' + escapeHtml(ev.overlap_start) + ' – ' + escapeHtml(ev.overlap_end) + (ev.campaign_type ? ' · ' + escapeHtml(ev.campaign_type) : '') + '<br>Цель: ' + escapeHtml(target) + '</div>' +
+          '<div class="event-sales"><span class="label">Продажи по целевой группе за период пересечения:</span> ' + formatMoney(sd.total_revenue || 0) + ', ' + (sd.orders_count || 0) + ' заказов</div>' +
+          '</div>';
+      }).join('');
+    }
+    function escapeHtml(s) {
+      if (s == null) return '';
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function loadEvents() {
+      fetchEvents(currentEventsPeriod).then(renderEventsList).catch(() => {
+        const list = document.getElementById('eventsList');
+        if (list) list.innerHTML = '<p class="status error">Не удалось загрузить события</p>';
+      });
+    }
+
+    function fetchEventsAnalysis(period) {
+      const params = new URLSearchParams();
+      params.set('date', dateRef.value || todayStr());
+      params.set('period', period || currentEventsAnalysisPeriod);
+      return fetch('/api/events-analysis?' + params.toString(), { credentials: 'same-origin' })
+        .then(r => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.href); throw new Error('Unauthorized'); } return r.json(); });
+    }
+    function renderEventsAnalysisList(data) {
+      const list = document.getElementById('eventsAnalysisList');
+      if (!list) return;
+      const events = data.events || [];
+      if (events.length === 0) {
+        list.innerHTML = '<p class="status">Нет событий за выбранный период.</p>';
+        return;
+      }
+      list.innerHTML = events.map(ev => {
+        const during = ev.sales_during || {};
+        const before = ev.sales_before || {};
+        const change = ev.revenue_change != null ? ev.revenue_change : 0;
+        const pct = ev.revenue_change_pct != null ? ev.revenue_change_pct : 0;
+        const changeCl = change > 0 ? 'positive' : (change < 0 ? 'negative' : '');
+        const changeStr = (change >= 0 ? '+' : '') + formatMoney(change) + ' (' + (pct >= 0 ? '+' : '') + pct + '%)';
+        let roiStr = '';
+        if (ev.roi != null && ev.cost_total > 0) roiStr = '<div class="event-roi">Затраты: ' + formatMoney(ev.cost_total) + ', ROI: ' + ev.roi + '</div>';
+        return '<div class="event-card events-analysis-card">' +
+          '<div class="event-name">' + escapeHtml(ev.name) + '</div>' +
+          '<div class="event-meta">' + escapeHtml(ev.overlap_start) + ' – ' + escapeHtml(ev.overlap_end) + ' · ' + escapeHtml(ev.sales_target || '') + ' · ' + escapeHtml(ev.product_type || '') + '</div>' +
+          '<div class="event-during">Во время: ' + formatMoney(during.total_revenue || 0) + ', ' + (during.orders_count || 0) + ' заказов</div>' +
+          '<div class="event-before">До: ' + formatMoney(before.total_revenue || 0) + ', ' + (before.orders_count || 0) + ' заказов</div>' +
+          '<div class="event-change ' + changeCl + '">' + changeStr + '</div>' + roiStr +
+          '</div>';
+      }).join('');
+    }
+    function loadEventsAnalysis() {
+      fetchEventsAnalysis(currentEventsAnalysisPeriod).then(renderEventsAnalysisList).catch(() => {
+        const list = document.getElementById('eventsAnalysisList');
+        if (list) list.innerHTML = '<p class="status error">Не удалось загрузить аналитику</p>';
+      });
+    }
+
     function applyReport(data) {
       lastReportData = data;
       renderSummary(data);
       renderCharts(data);
       if (data.prev_7d) renderAnalytics(data);
+      loadEvents();
       if (data.product_types_available && data.product_types_available.length && !filterList.innerHTML) {
         renderFilterChips(data.product_types_available);
       }
@@ -755,6 +875,22 @@
         tab.classList.add('active');
         const id = 'panel-' + tab.dataset.tab;
         document.getElementById(id).classList.add('active');
+        if (tab.dataset.tab === 'events-analysis') loadEventsAnalysis();
+      });
+    });
+
+    document.querySelectorAll('.events-period-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentEventsPeriod = btn.dataset.period || '7d';
+        document.querySelectorAll('.events-period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === currentEventsPeriod));
+        loadEvents();
+      });
+    });
+    document.querySelectorAll('.events-analysis-period-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentEventsAnalysisPeriod = btn.dataset.period || '7d';
+        document.querySelectorAll('.events-analysis-period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === currentEventsAnalysisPeriod));
+        loadEventsAnalysis();
       });
     });
 

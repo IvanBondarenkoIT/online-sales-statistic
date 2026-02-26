@@ -1,7 +1,8 @@
 """
 Веб-приложение отчёта по онлайн-продажам.
 Защита: логин/пароль из .env (ADMIN_USER, ADMIN_PASSWORD).
-API: GET /api/report?date=YYYY-MM-DD, exclude=...; POST /api/refresh.
+API: GET /api/report?date=..., exclude=...; GET /api/events?date=...&period=7d|4w;
+     GET /api/events-analysis?date=...&period=7d|4w; POST /api/refresh.
 """
 from datetime import date
 from pathlib import Path
@@ -10,6 +11,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request, send_from_directory, session, url_for
 
 from report_data import DATA_CSV, build_report
+from events_data import get_events_with_sales, get_events_analysis
 
 load_dotenv()
 
@@ -71,10 +73,42 @@ def api_report():
     return jsonify(data)
 
 
+@app.route("/api/events")
+@auth_required
+def api_events():
+    """События за период (7d/4w) и продажи по целевой группе (Вариант 1)."""
+    date_param = request.args.get("date") or ""
+    ref = date.fromisoformat(date_param.strip()[:10]) if date_param.strip() else date.today()
+    period = request.args.get("period", "7d").lower()
+    if period not in ("7d", "4w"):
+        period = "7d"
+    try:
+        data = get_events_with_sales(ref, period=period)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/events-analysis")
+@auth_required
+def api_events_analysis():
+    """Аналитика по событиям: до/во время, прирост, ROI (Вариант 3)."""
+    date_param = request.args.get("date") or ""
+    ref = date.fromisoformat(date_param.strip()[:10]) if date_param.strip() else date.today()
+    period = request.args.get("period", "7d").lower()
+    if period not in ("7d", "4w"):
+        period = "7d"
+    try:
+        data = get_events_analysis(ref, period=period)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/refresh", methods=["POST"])
 @auth_required
 def api_refresh():
-    """Обновляет data/online_sales.csv из Google Таблицы и возвращает новый отчёт."""
+    """Обновляет data/online_sales.csv и data/events.csv из Google и возвращает новый отчёт."""
     try:
         from fetch_sheet import fetch_via_csv_export
         df = fetch_via_csv_export()
@@ -82,6 +116,14 @@ def api_refresh():
         df.to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    try:
+        from fetch_events import fetch_events_df
+        events_df = fetch_events_df()
+        from events_data import EVENTS_CSV
+        EVENTS_CSV.parent.mkdir(parents=True, exist_ok=True)
+        events_df.to_csv(EVENTS_CSV, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass  # события опциональны: при ошибке оставляем старый events.csv
     date_param = request.args.get("date")
     reference_date = date_param if date_param else date.today().isoformat()
     exclude = request.args.get("exclude")
