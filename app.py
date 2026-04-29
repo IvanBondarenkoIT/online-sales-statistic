@@ -4,13 +4,14 @@
 API: GET /api/report?date=..., exclude=...; GET /api/events?date=...&period=7d|4w;
      GET /api/events-analysis?date=...&period=7d|4w; POST /api/refresh.
 """
+import os
 from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request, send_from_directory, session, url_for
 
-from report_data import DATA_CSV, build_report
+from report_data import DATA_CSV, build_report, load_sales_df, _parse_date
 from events_data import get_events_with_sales, get_events_analysis
 
 load_dotenv()
@@ -22,6 +23,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 ADMIN_USER = __import__("os").environ.get("ADMIN_USER", "admin")
 ADMIN_PASSWORD = __import__("os").environ.get("ADMIN_PASSWORD", "admin")
+API_EXPORT_KEY = os.environ.get("API_EXPORT_KEY", "").strip()
 
 
 def auth_required(f):
@@ -33,6 +35,34 @@ def auth_required(f):
         return redirect(url_for("login", next=request.url))
     wrapped.__name__ = f.__name__
     return wrapped
+
+
+def _require_api_key() -> tuple[bool, tuple]:
+    """Проверяет ключ API из заголовка X-API-Key или query api_key."""
+    expected = (API_EXPORT_KEY or "").strip()
+    provided = (request.headers.get("X-API-Key") or request.args.get("api_key") or "").strip()
+    if not expected:
+        return False, (jsonify({"error": "API key is not configured"}), 500)
+    if not provided or provided != expected:
+        return False, (jsonify({"error": "Unauthorized"}), 401)
+    return True, ()
+
+
+def _json_safe(v):
+    """Приводит pandas/numpy значения к JSON-совместимым."""
+    if hasattr(v, "item"):
+        try:
+            v = v.item()
+        except Exception:
+            pass
+    if hasattr(v, "isoformat"):
+        try:
+            return v.isoformat()
+        except Exception:
+            pass
+    if v != v:  # NaN
+        return None
+    return v
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -130,6 +160,51 @@ def api_refresh():
     exclude_list = [x.strip() for x in exclude.split(",") if x.strip()] if exclude else None
     data = build_report(reference_date=reference_date, exclude_product_types=exclude_list)
     return jsonify({"ok": True, "report": data})
+
+
+@app.route("/api/sales-table")
+def api_sales_table():
+    """
+    Возвращает строки таблицы онлайн-продаж за указанную дату.
+    Доступ: по API ключу (X-API-Key или query api_key).
+    Query: date=YYYY-MM-DD (или DD.MM.YYYY).
+    """
+    ok, err = _require_api_key()
+    if not ok:
+        return err
+
+    date_param = (request.args.get("date") or "").strip()
+    if not date_param:
+        return jsonify({"error": "date query parameter is required"}), 400
+
+    target_dt = None
+    try:
+        target_dt = date.fromisoformat(date_param[:10])
+    except ValueError:
+        parsed = _parse_date(date_param)
+        if parsed is not None:
+            target_dt = parsed.date()
+    if target_dt is None:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD or DD.MM.YYYY"}), 400
+
+    df = load_sales_df()
+    if df.empty or "_date" not in df.columns:
+        return jsonify({"ok": True, "date": target_dt.isoformat(), "count": 0, "rows": []})
+
+    day_df = df[df["_date"].dt.date == target_dt].copy()
+    if day_df.empty:
+        return jsonify({"ok": True, "date": target_dt.isoformat(), "count": 0, "rows": []})
+
+    rows = []
+    for _, row in day_df.iterrows():
+        item = {}
+        for col in day_df.columns:
+            if col == "_date":
+                item[col] = row[col].date().isoformat() if row[col] is not None else None
+            else:
+                item[col] = _json_safe(row[col])
+        rows.append(item)
+    return jsonify({"ok": True, "date": target_dt.isoformat(), "count": len(rows), "rows": rows})
 
 
 if __name__ == "__main__":

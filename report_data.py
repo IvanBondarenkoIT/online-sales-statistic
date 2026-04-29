@@ -3,6 +3,7 @@
 Поддержка фильтра по периоду и нормализация полей из CSV.
 """
 import re
+import os
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -120,8 +121,12 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
     """Загружает данные из CSV или из Excel в data/input. Нормализует имена столбцов и типы."""
     path = csv_path
     if path is None:
+        source = os.environ.get("SALES_DATA_SOURCE", "google").strip().lower()
         excel_path = _latest_input_excel()
-        path = excel_path if excel_path is not None else DATA_CSV
+        if source == "excel" and excel_path is not None:
+            path = excel_path
+        else:
+            path = DATA_CSV
     if not path.exists():
         return pd.DataFrame()
 
