@@ -65,6 +65,26 @@ def _json_safe(v):
     return v
 
 
+def _refresh_sales_and_events() -> tuple[bool, str | None]:
+    """Обновляет sales/events CSV из Google. Возвращает (ok, error)."""
+    try:
+        from fetch_sheet import fetch_via_csv_export
+        df = fetch_via_csv_export()
+        DATA_CSV.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
+    except Exception as e:
+        return False, str(e)
+    try:
+        from fetch_events import fetch_events_df
+        events_df = fetch_events_df()
+        from events_data import EVENTS_CSV
+        EVENTS_CSV.parent.mkdir(parents=True, exist_ok=True)
+        events_df.to_csv(EVENTS_CSV, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass  # события опциональны: при ошибке оставляем старый events.csv
+    return True, None
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
@@ -139,27 +159,30 @@ def api_events_analysis():
 @auth_required
 def api_refresh():
     """Обновляет data/online_sales.csv и data/events.csv из Google и возвращает новый отчёт."""
-    try:
-        from fetch_sheet import fetch_via_csv_export
-        df = fetch_via_csv_export()
-        DATA_CSV.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    try:
-        from fetch_events import fetch_events_df
-        events_df = fetch_events_df()
-        from events_data import EVENTS_CSV
-        EVENTS_CSV.parent.mkdir(parents=True, exist_ok=True)
-        events_df.to_csv(EVENTS_CSV, index=False, encoding="utf-8-sig")
-    except Exception:
-        pass  # события опциональны: при ошибке оставляем старый events.csv
+    ok, error = _refresh_sales_and_events()
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 500
     date_param = request.args.get("date")
     reference_date = date_param if date_param else date.today().isoformat()
     exclude = request.args.get("exclude")
     exclude_list = [x.strip() for x in exclude.split(",") if x.strip()] if exclude else None
     data = build_report(reference_date=reference_date, exclude_product_types=exclude_list)
     return jsonify({"ok": True, "report": data})
+
+
+@app.route("/api/refresh-by-key", methods=["POST"])
+def api_refresh_by_key():
+    """
+    Обновляет data/online_sales.csv и data/events.csv из Google по API ключу.
+    Использование: POST /api/refresh-by-key (+ X-API-Key или query api_key).
+    """
+    ok, err = _require_api_key()
+    if not ok:
+        return err
+    ok_refresh, error = _refresh_sales_and_events()
+    if not ok_refresh:
+        return jsonify({"ok": False, "error": error}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/api/sales-table")
