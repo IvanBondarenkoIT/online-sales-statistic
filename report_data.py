@@ -12,8 +12,8 @@ import pandas as pd
 DATA_CSV = Path(__file__).resolve().parent / "data" / "online_sales.csv"
 DATA_INPUT_DIR = Path(__file__).resolve().parent / "data" / "input"
 
-# Форматы дат в таблице: 02.02.2026, 2.2.2026, 15.2.26
-DATE_FORMATS = ["%d.%m.%Y", "%d.%m.%y"]
+# Форматы дат в таблице: 02.02.2026, 2.2.2026, 25,05,2026 (запятая в экспорте)
+DATE_FORMATS = ["%d.%m.%Y", "%d.%m.%y", "%d,%m,%Y", "%d,%m,%y"]
 
 
 def _parse_date(s) -> datetime | None:
@@ -33,8 +33,8 @@ def _parse_date(s) -> datetime | None:
             return datetime.strptime(s, fmt)
         except ValueError:
             continue
-    # Попытка без ведущих нулей (Windows-style %#d не везде есть)
-    m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$", s)
+    # d.m.y или d,m,y без ведущих нулей
+    m = re.match(r"^(\d{1,2})[.,](\d{1,2})[.,](\d{2,4})$", s)
     if m:
         d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
         if y < 100:
