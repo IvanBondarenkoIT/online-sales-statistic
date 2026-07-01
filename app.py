@@ -268,12 +268,18 @@ def api_data_status():
     return jsonify({"ok": True, **_sales_data_status()})
 
 
+def _sales_table_skip_refresh() -> bool:
+    """refresh=0|false|no — не обращаться к Google, читать только локальный CSV."""
+    return (request.args.get("refresh") or "").strip().lower() in ("0", "false", "no")
+
+
 @app.route("/api/sales-table")
 def api_sales_table():
     """
     Возвращает строки таблицы онлайн-продаж за указанную дату.
     Доступ: по API ключу (X-API-Key или query api_key).
-    Query: date=YYYY-MM-DD (или DD.MM.YYYY); refresh=1 — обновить из Google перед выборкой.
+    Query: date=YYYY-MM-DD (или DD.MM.YYYY).
+    По умолчанию перед выборкой обновляет CSV из Google; refresh=0 — только локальный файл.
     """
     ok, err = _require_api_key()
     if not ok:
@@ -287,21 +293,33 @@ def api_sales_table():
     if target_dt is None:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD or DD.MM.YYYY"}), 400
 
-    refresh_flag = (request.args.get("refresh") or "").strip().lower() in ("1", "true", "yes")
-    if refresh_flag:
-        ok_refresh, error, _meta = _refresh_sales_and_events()
+    skip_refresh = _sales_table_skip_refresh()
+    refresh_meta: dict = {}
+    if not skip_refresh:
+        ok_refresh, error, refresh_meta = _refresh_sales_and_events()
         if not ok_refresh:
-            return jsonify({"ok": False, "error": error, "date": target_dt.isoformat()}), 500
+            return jsonify({
+                "ok": False,
+                "error": error,
+                "date": target_dt.isoformat(),
+                "refreshed": False,
+            }), 500
 
     status = _sales_data_status()
     if not status["data_loaded"]:
+        hint = (
+            "No sales data in local CSV; remove refresh=0 to load from Google Sheets"
+            if skip_refresh
+            else "Google Sheets returned no usable sales data"
+        )
         return jsonify({
             "ok": True,
             "date": target_dt.isoformat(),
             "count": 0,
             "rows": [],
             "data_loaded": False,
-            "hint": "Call POST /api/refresh-by-key first",
+            "refreshed": not skip_refresh,
+            "hint": hint,
             **status,
         })
 
@@ -312,8 +330,12 @@ def api_sales_table():
         "count": count,
         "rows": rows,
         "data_loaded": True,
+        "refreshed": not skip_refresh,
         "max_date": status.get("max_date"),
     }
+    if refresh_meta:
+        payload["rows_loaded"] = refresh_meta.get("rows")
+        payload["sheets_loaded"] = refresh_meta.get("sheets_loaded")
     if count == 0:
         payload["hint"] = "No sales rows for this date in loaded data"
     return jsonify(payload)

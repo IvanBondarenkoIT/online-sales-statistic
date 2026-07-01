@@ -168,32 +168,40 @@ git push -u origin production
 
 ### Порядок вызовов для cron
 
+**Основной сценарий — один запрос** (refresh из Google и выборка за дату):
+
 ```bash
-# 1. Обновить CSV из Google Sheets (обязательно после redeploy)
-curl -X POST -H "X-API-Key: YOUR_KEY" \
-  "https://YOUR-DOMAIN/api/refresh-by-key"
-
-# 2. Проверить, что данные загружены (row_count > 0, max_date актуальна)
-curl -H "X-API-Key: YOUR_KEY" \
-  "https://YOUR-DOMAIN/api/data-status"
-
-# 3. Получить строки за дату
 curl -H "X-API-Key: YOUR_KEY" \
   "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21"
 ```
 
-Альтернатива одним запросом (refresh + выборка):
+Или с ключом в query (удобно для простых cron-задач):
+
+```bash
+curl "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21&api_key=YOUR_KEY"
+```
+
+Перед каждым запросом данные автоматически подтягиваются из Google Sheets. Ответ включает `refreshed: true`, `rows_loaded`, `count`, `rows`.
+
+**Быстрое чтение без обращения к Google** (только локальный CSV на сервере):
 
 ```bash
 curl -H "X-API-Key: YOUR_KEY" \
-  "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21&refresh=1"
+  "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21&refresh=0"
+```
+
+**Опционально** — отдельное обновление без выборки по дате или проверка статуса:
+
+```bash
+curl -X POST -H "X-API-Key: YOUR_KEY" "https://YOUR-DOMAIN/api/refresh-by-key"
+curl -H "X-API-Key: YOUR_KEY" "https://YOUR-DOMAIN/api/data-status"
 ```
 
 ### Ответы API
 
-- **`POST /api/refresh-by-key`** — при успехе: `ok`, `rows`, `sheets_loaded`, `sheets_failed`, `max_date`. При ошибке загрузки (0 строк) — `500`, существующий CSV **не перезаписывается**.
+- **`GET /api/sales-table?date=...`** — по умолчанию refresh + `count`, `rows`, `refreshed`, `rows_loaded`. `refresh=0` — только CSV на диске.
+- **`POST /api/refresh-by-key`** — только обновление: `ok`, `rows`, `sheets_loaded`, `max_date`. При ошибке — `500`, CSV не затирается.
 - **`GET /api/data-status`** — `csv_exists`, `row_count`, `min_date`, `max_date`, `data_loaded`, `file_mtime`.
-- **`GET /api/sales-table?date=...`** — `count`, `rows`, `data_loaded`. Если `data_loaded: false` — сначала вызовите refresh.
 
 Кнопка «Обновить данные» в UI делает то же, что refresh, но требует логин.
 

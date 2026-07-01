@@ -1,7 +1,6 @@
 """
 Тесты цепочки ретрансляции: refresh-by-key → sales-table / data-status.
 """
-from datetime import datetime
 from unittest.mock import patch
 
 import pandas as pd
@@ -99,15 +98,19 @@ def test_sales_table_without_key_returns_401(client):
     assert resp.status_code == 401
 
 
-def test_sales_table_empty_csv_reports_data_loaded_false(client):
+def test_sales_table_empty_csv_with_refresh_zero_reports_data_loaded_false(client):
     test_client, _ = client
-    resp = test_client.get("/api/sales-table?date=2026-04-21", headers=_auth_headers())
+    resp = test_client.get(
+        "/api/sales-table?date=2026-04-21&refresh=0",
+        headers=_auth_headers(),
+    )
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["ok"] is True
     assert data["count"] == 0
     assert data["data_loaded"] is False
-    assert "refresh-by-key" in data["hint"]
+    assert data["refreshed"] is False
+    assert "refresh=0" in data["hint"]
 
 
 def test_refresh_by_key_empty_fetch_returns_500_and_keeps_old_csv(client):
@@ -141,16 +144,17 @@ def test_refresh_by_key_success_returns_metadata(client):
     assert csv_path.exists()
 
 
-def test_sales_table_after_refresh_returns_eight_rows(client):
+def test_sales_table_default_refresh_returns_eight_rows(client):
     test_client, _ = client
-    with patch("fetch_sheet.fetch_via_csv_export", return_value=_sample_fetch_result()):
-        refresh = test_client.post("/api/refresh-by-key", headers=_auth_headers())
-        assert refresh.status_code == 200
+    with patch("fetch_sheet.fetch_via_csv_export", return_value=_sample_fetch_result()) as mock_fetch:
+        resp = test_client.get("/api/sales-table?date=2026-04-21", headers=_auth_headers())
 
-    resp = test_client.get("/api/sales-table?date=2026-04-21", headers=_auth_headers())
+    assert mock_fetch.called
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["data_loaded"] is True
+    assert data["refreshed"] is True
+    assert data["rows_loaded"] == 8
     assert data["count"] == 8
     assert len(data["rows"]) == 8
 
@@ -170,14 +174,17 @@ def test_data_status_endpoint(client):
     assert data["file_mtime"] is not None
 
 
-def test_sales_table_refresh_query_triggers_reload(client):
-    test_client, _ = client
+def test_sales_table_refresh_zero_skips_fetch(client):
+    test_client, csv_path = client
     with patch("fetch_sheet.fetch_via_csv_export", return_value=_sample_fetch_result()) as mock_fetch:
+        test_client.post("/api/refresh-by-key", headers=_auth_headers())
+        mock_fetch.reset_mock()
         resp = test_client.get(
-            "/api/sales-table?date=2026-04-21&refresh=1",
+            "/api/sales-table?date=2026-04-21&refresh=0",
             headers=_auth_headers(),
         )
 
-    assert mock_fetch.called
+    mock_fetch.assert_not_called()
     assert resp.status_code == 200
     assert resp.get_json()["count"] == 8
+    assert resp.get_json()["refreshed"] is False
