@@ -7,7 +7,7 @@ import requests
 import pandas as pd
 
 from config import SHEET_GIDS, csv_export_url, SPREADSHEET_ID
-from fetch_sheet import fetch_via_csv_export, _fetch_one_sheet, _normalize_columns
+from fetch_sheet import FetchResult, fetch_via_csv_export, _fetch_one_sheet, _normalize_columns
 
 
 def test_config_has_spreadsheet_id_and_gids():
@@ -45,9 +45,11 @@ def test_fetch_one_sheet_returns_dataframe():
 def test_fetch_via_csv_export_returns_combined_data():
     """fetch_via_csv_export возвращает объединённую таблицу с данными (интеграционный тест)."""
     try:
-        df = fetch_via_csv_export()
+        result = fetch_via_csv_export()
     except requests.RequestException as e:
         pytest.skip(f"Нет доступа к таблице или сеть: {e}")
+    assert isinstance(result, FetchResult)
+    df = result.df
     assert isinstance(df, pd.DataFrame)
     assert not df.empty, "Ожидаются данные из хотя бы одной вкладки"
     # Проверка, что есть столбцы с датой и суммой

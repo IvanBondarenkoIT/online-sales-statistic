@@ -72,7 +72,7 @@ python app.py
 
 - **На дату** — одна дата (по умолчанию сегодня); от неё считаются «последние 7 дней» и «4 недели».
 - **Показать отчёт** — пересчёт по выбранной дате.
-- **Обновить данные** — загрузка данных со всех вкладок (январь, февраль, март) из Google Таблицы.
+- **Обновить данные** — загрузка данных со всех вкладок (месяцы из `config.py`) из Google Таблицы.
 - **Метрика** — переключатель: Сумма / Количество / Средний чек (в сводке и на графиках по дням и неделям).
 - **Фильтр по типам товаров** — исключение групп из отчёта (например, без Coffee makers).
 - **Вкладки:** Итоги, 7 дней, По неделям, Каналы, Товары, **Аналитика** (тренд, сравнение периодов, выводы для решений).
@@ -91,7 +91,7 @@ online-sales-statistic/
 │   ├── index.html      # веб-интерфейс отчёта
 │   └── login.html      # страница входа
 ├── app.py              # Flask: авторизация, API отчёта, обновление данных
-├── config.py           # SPREADSHEET_ID, SHEET_GIDS (январь, февраль, март)
+├── config.py           # SPREADSHEET_ID, SHEET_GIDS (все месяцы из config)
 ├── fetch_sheet.py      # загрузка всех вкладок и объединение в один CSV
 ├── report_data.py      # загрузка CSV, фильтр по дате и типам товаров, агрегаты
 ├── requirements.txt
@@ -146,10 +146,57 @@ git push -u origin production
    - `SECRET_KEY` — длинная случайная строка (например, сгенерированная онлайн).
    - `ADMIN_USER` — логин входа (например, `admin`).
    - `ADMIN_PASSWORD` — пароль входа.
+   - `API_EXPORT_KEY` — ключ для `/api/refresh-by-key`, `/api/data-status`, `/api/sales-table`.
+   - `SALES_DATA_SOURCE=google` — источник продаж (CSV после refresh).
 4. Railway сам соберёт проект (Nixpacks), установит зависимости и запустит по `railway.json`: `gunicorn --bind 0.0.0.0:$PORT app:app`.
 5. В разделе **Settings** → **Networking** нажмите **Generate Domain** — получите публичный URL.
 
-**Важно:** На Railway файловая система эфемерная. Кнопка «Обновить данные» подтянет CSV до перезапуска сервиса; после рестарта данные нужно обновить снова или настроить постоянное хранилище (Volume / внешнее хранилище).
+**Важно:** На Railway файловая система эфемерная. Файл `data/online_sales.csv` **не попадает в деплой** (см. `.gitignore`). После каждого redeploy/restart данные нужно заново подтянуть из Google.
+
+## API ретрансляции (для внешнего cron)
+
+Экспорт строк продаж за одну дату и обновление CSV без входа в UI — по секретному ключу `API_EXPORT_KEY`.
+
+### Переменные окружения
+
+| Переменная | Назначение |
+|------------|------------|
+| `API_EXPORT_KEY` | Секретный ключ для API (`X-API-Key` или `api_key` в query) |
+| `SALES_DATA_SOURCE` | `google` (по умолчанию) — читать `data/online_sales.csv` после refresh |
+
+Рекомендуется задать те же переменные в Railway Variables. **Не передавайте ключ в URL в логах** — лучше заголовок `X-API-Key`. При утечке ключа смените `API_EXPORT_KEY` на Railway и в cron.
+
+### Порядок вызовов для cron
+
+```bash
+# 1. Обновить CSV из Google Sheets (обязательно после redeploy)
+curl -X POST -H "X-API-Key: YOUR_KEY" \
+  "https://YOUR-DOMAIN/api/refresh-by-key"
+
+# 2. Проверить, что данные загружены (row_count > 0, max_date актуальна)
+curl -H "X-API-Key: YOUR_KEY" \
+  "https://YOUR-DOMAIN/api/data-status"
+
+# 3. Получить строки за дату
+curl -H "X-API-Key: YOUR_KEY" \
+  "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21"
+```
+
+Альтернатива одним запросом (refresh + выборка):
+
+```bash
+curl -H "X-API-Key: YOUR_KEY" \
+  "https://YOUR-DOMAIN/api/sales-table?date=2026-04-21&refresh=1"
+```
+
+### Ответы API
+
+- **`POST /api/refresh-by-key`** — при успехе: `ok`, `rows`, `sheets_loaded`, `sheets_failed`, `max_date`. При ошибке загрузки (0 строк) — `500`, существующий CSV **не перезаписывается**.
+- **`GET /api/data-status`** — `csv_exists`, `row_count`, `min_date`, `max_date`, `data_loaded`, `file_mtime`.
+- **`GET /api/sales-table?date=...`** — `count`, `rows`, `data_loaded`. Если `data_loaded: false` — сначала вызовите refresh.
+
+Кнопка «Обновить данные» в UI делает то же, что refresh, но требует логин.
+
 
 ## Лицензия
 
