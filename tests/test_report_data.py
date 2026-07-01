@@ -10,9 +10,31 @@ import pytest
 
 from report_data import (
     DATA_CSV,
+    _parse_date,
     build_report,
     load_sales_df,
 )
+
+
+def test_parse_date_accepts_dot_format():
+    """Даты с точкой: 01.07.2026."""
+    dt = _parse_date("01.07.2026")
+    assert dt is not None
+    assert dt.year == 2026 and dt.month == 7 and dt.day == 1
+
+
+def test_parse_date_accepts_comma_format_july():
+    """Даты с запятой в экспорте Google Sheets: 01,07,2026."""
+    dt = _parse_date("01,07,2026")
+    assert dt is not None
+    assert dt.year == 2026 and dt.month == 7 and dt.day == 1
+
+
+def test_parse_date_accepts_comma_format_may_regression():
+    """Регрессия: майские даты с запятой (25,05,2026) не должны теряться."""
+    dt = _parse_date("25,05,2026")
+    assert dt is not None
+    assert dt.year == 2026 and dt.month == 5 and dt.day == 25
 
 
 def test_load_sales_df_uses_default_path():
