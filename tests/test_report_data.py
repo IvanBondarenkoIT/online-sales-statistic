@@ -37,6 +37,26 @@ def test_parse_date_accepts_comma_format_may_regression():
     assert dt.year == 2026 and dt.month == 5 and dt.day == 25
 
 
+def test_load_sales_df_drops_unrealistic_years():
+    """Опечатки года (2029) отбрасываются; валидные даты 2026 остаются."""
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w", encoding="utf-8-sig") as f:
+        f.write(
+            "Date,Total Amount,Sales channel,Product Type\n"
+            "01.09.2026,100,WOLT,Purges\n"
+            "19.07.2029,50,WOLT,Coffee\n"
+            '"19,07,2029",25,Website,Coffee\n'
+        )
+        path = Path(f.name)
+    try:
+        df = load_sales_df(csv_path=path)
+        assert len(df) == 1
+        assert df["_date"].iloc[0].year == 2026
+        assert df["_date"].iloc[0].month == 9
+        assert df["_date"].max().year == 2026
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def test_load_sales_df_uses_default_path():
     """Загрузка идёт из data/online_sales.csv по умолчанию."""
     df = load_sales_df()

@@ -170,6 +170,10 @@ def load_sales_df(csv_path: Path | None = None) -> pd.DataFrame:
             primary_dates = primary_dates.fillna(fallback_dates)
         df["_date"] = pd.to_datetime(primary_dates, errors="coerce")
         df = df[df["_date"].notna()].copy()
+        # Отбрасываем опечатки года (например 19,07,2029), чтобы не портить max_date/отчёты
+        if not df.empty:
+            years = df["_date"].dt.year
+            df = df[(years >= 2025) & (years <= 2027)].copy()
     if "Total Amount" in df.columns:
         df["_total"] = df["Total Amount"].apply(_to_float)
         df = df[df["_total"].notna()].copy()
